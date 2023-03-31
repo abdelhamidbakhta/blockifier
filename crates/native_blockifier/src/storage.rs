@@ -18,6 +18,8 @@ use crate::py_state_diff::PyBlockInfo;
 use crate::py_utils::PyFelt;
 use crate::PyStateDiff;
 
+const GENESIS_BLOCK_ID: u64 = u64::MAX;
+
 #[pyclass]
 pub struct Storage {
     pub reader: papyrus_storage::StorageReader,
@@ -29,8 +31,11 @@ impl Storage {
     #[new]
     #[args(path, max_size)]
     pub fn new(path: String, max_size: usize) -> NativeBlockifierResult<Storage> {
+        log::debug!("Initializing Blockifier storage...");
         let db_config = papyrus_storage::db::DbConfig { path, max_size };
         let (reader, writer) = papyrus_storage::open_storage(db_config)?;
+        log::debug!("Initialized Blockifier storage.");
+
         Ok(Storage { reader, writer })
     }
 
@@ -54,6 +59,7 @@ impl Storage {
 
     #[args(block_number)]
     pub fn revert_state_diff(&mut self, block_number: u64) -> NativeBlockifierResult<()> {
+        log::debug!("Reverting state diff for {block_number:?}.");
         let block_number = BlockNumber(block_number);
         let revert_txn = self.writer.begin_rw_txn()?;
         let (revert_txn, _) = revert_txn.revert_state_diff(block_number)?;
@@ -68,11 +74,15 @@ impl Storage {
     pub fn append_state_diff(
         &mut self,
         block_id: u64,
-        previous_block_id: u64,
+        previous_block_id: Option<u64>,
         py_block_info: PyBlockInfo,
         py_state_diff: PyStateDiff,
         declared_class_hash_to_class: HashMap<PyFelt, String>,
     ) -> NativeBlockifierResult<()> {
+        log::debug!(
+            "Appending state diff with {block_id:?} for block_number: {}.",
+            py_block_info.block_number
+        );
         let block_number = BlockNumber(py_block_info.block_number);
 
         // Deserialize contract classes.
@@ -98,7 +108,7 @@ impl Storage {
 
         let block_header = BlockHeader {
             block_hash: BlockHash(StarkHash::from(block_id)),
-            parent_hash: BlockHash(StarkHash::from(previous_block_id)),
+            parent_hash: BlockHash(StarkHash::from(previous_block_id.unwrap_or(GENESIS_BLOCK_ID))),
             block_number,
             gas_price: GasPrice(py_block_info.gas_price),
             state_root: GlobalRoot::default(),

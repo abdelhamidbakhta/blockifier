@@ -11,7 +11,7 @@ use starknet_api::{calldata, patricia_key, stark_felt};
 use test_case::test_case;
 
 use crate::abi::abi_utils::selector_from_name;
-use crate::execution::entry_point::{CallEntryPoint, CallExecution, CallInfo, Retdata};
+use crate::execution::entry_point::{CallEntryPoint, CallExecution, CallInfo, CallType, Retdata};
 use crate::retdata;
 use crate::state::cached_state::CachedState;
 use crate::state::state_api::StateReader;
@@ -91,6 +91,7 @@ fn test_nested_library_call() {
         entry_point_selector: inner_entry_point_selector,
         calldata: calldata![stark_felt!(key + 1), stark_felt!(value + 1)],
         class_hash: Some(ClassHash(stark_felt!(TEST_CLASS_HASH))),
+        call_type: CallType::Delegate,
         ..trivial_external_entry_point()
     };
     let library_entry_point = CallEntryPoint {
@@ -103,6 +104,7 @@ fn test_nested_library_call() {
             stark_felt!(value + 1)        // Calldata: value.
         ],
         class_hash: Some(ClassHash(stark_felt!(TEST_CLASS_HASH))),
+        call_type: CallType::Delegate,
         ..trivial_external_entry_point()
     };
     let storage_entry_point = CallEntryPoint {
@@ -119,12 +121,12 @@ fn test_nested_library_call() {
         accessed_storage_keys: HashSet::from([StorageKey(patricia_key!(key + 1))]),
         ..Default::default()
     };
-    let library_call_vm_resources = storage_entry_point_vm_resources.clone()
-        + VmExecutionResources {
-            n_steps: 38,
-            builtin_instance_counter: HashMap::from([(RANGE_CHECK_BUILTIN_NAME.to_string(), 1)]),
-            ..Default::default()
-        };
+    let mut library_call_vm_resources = VmExecutionResources {
+        n_steps: 38,
+        builtin_instance_counter: HashMap::from([(RANGE_CHECK_BUILTIN_NAME.to_string(), 1)]),
+        ..Default::default()
+    };
+    library_call_vm_resources += &storage_entry_point_vm_resources;
     let library_call_info = CallInfo {
         call: library_entry_point,
         execution: CallExecution::from_retdata(retdata![stark_felt!(value + 1)]),
@@ -141,13 +143,9 @@ fn test_nested_library_call() {
         ..Default::default()
     };
 
-    let main_call_vm_resources = library_call_vm_resources
-        + storage_entry_point_vm_resources
-        + VmExecutionResources {
-            n_steps: 83,
-            builtin_instance_counter: HashMap::from([(RANGE_CHECK_BUILTIN_NAME.to_string(), 1)]),
-            ..Default::default()
-        };
+    // Nested library call cost: library_call(inner) + library_call(library_call(inner)).
+    let mut main_call_vm_resources = VmExecutionResources { n_steps: 45, ..Default::default() };
+    main_call_vm_resources += &(&library_call_vm_resources * 2);
     let expected_call_info = CallInfo {
         call: main_entry_point.clone(),
         execution: CallExecution::from_retdata(retdata![stark_felt!(0)]),

@@ -1,6 +1,7 @@
 use cairo_felt::Felt252;
 use cairo_vm::types::relocatable::Relocatable;
 use cairo_vm::vm::vm_core::VirtualMachine;
+use serde::Deserialize;
 use starknet_api::block::{BlockNumber, BlockTimestamp};
 use starknet_api::core::{
     calculate_contract_address, ClassHash, ContractAddress, EntryPointSelector,
@@ -9,10 +10,12 @@ use starknet_api::hash::StarkFelt;
 use starknet_api::state::{EntryPointType, StorageKey};
 use starknet_api::transaction::{
     Calldata, ContractAddressSalt, EthAddress, EventContent, EventData, EventKey, L2ToL1Payload,
-    MessageToL1,
 };
+use strum_macros::EnumIter;
 
-use crate::execution::entry_point::{CallEntryPoint, OrderedEvent, OrderedL2ToL1Message};
+use crate::execution::entry_point::{
+    CallEntryPoint, CallType, MessageToL1, OrderedEvent, OrderedL2ToL1Message,
+};
 use crate::execution::errors::SyscallExecutionError;
 use crate::execution::execution_utils::{
     execute_deployment, execute_library_call, felt_from_ptr, ReadOnlySegment,
@@ -29,7 +32,7 @@ pub mod test;
 pub type SyscallResult<T> = Result<T, SyscallExecutionError>;
 pub type WriteResponseResult = SyscallResult<()>;
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, EnumIter, Eq, Hash, PartialEq)]
 pub enum SyscallSelector {
     CallContract,
     DelegateCall,
@@ -236,6 +239,7 @@ pub fn call_contract(
         calldata: request.calldata,
         storage_address: request.contract_address,
         caller_address: syscall_handler.storage_address,
+        call_type: CallType::Call,
     };
     let retdata_segment = execute_inner_call(entry_point, vm, syscall_handler)?;
 

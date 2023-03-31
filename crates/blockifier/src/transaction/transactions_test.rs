@@ -19,7 +19,7 @@ use crate::abi::abi_utils::{get_storage_var_address, selector_from_name};
 use crate::abi::constants as abi_constants;
 use crate::block_context::BlockContext;
 use crate::execution::entry_point::{
-    CallEntryPoint, CallExecution, CallInfo, OrderedEvent, Retdata,
+    CallEntryPoint, CallExecution, CallInfo, CallType, OrderedEvent, Retdata,
 };
 use crate::retdata;
 use crate::state::cached_state::CachedState;
@@ -103,6 +103,7 @@ fn expected_validate_call_info(
             calldata,
             storage_address,
             caller_address: ContractAddress::default(),
+            call_type: CallType::Call,
         },
         // The account contract we use for testing has trivial `validate` functions.
         execution: CallExecution::default(),
@@ -134,6 +135,7 @@ fn expected_fee_transfer_call_info(
         ],
         storage_address: block_context.fee_token_address,
         caller_address: account_address,
+        call_type: CallType::Call,
     };
     let expected_fee_sender_address = *account_address.0.key();
     let expected_fee_transfer_event = OrderedEvent {
@@ -231,6 +233,7 @@ fn test_invoke_tx() {
         calldata: Calldata(expected_return_result_calldata.clone().into()),
         storage_address: ContractAddress(patricia_key!(TEST_CONTRACT_ADDRESS)),
         caller_address: expected_account_address,
+        call_type: CallType::Call,
     };
     let expected_execute_call = CallEntryPoint {
         entry_point_selector: selector_from_name(constants::EXECUTE_ENTRY_POINT_NAME),
@@ -280,6 +283,9 @@ fn test_invoke_tx() {
         fee_transfer_call_info: expected_fee_transfer_call_info,
         actual_fee: expected_actual_fee,
         actual_resources: ResourcesMapping::default(),
+        n_storage_updates: 0,
+        n_modified_contracts: 0,
+        n_class_updates: 0,
     };
 
     // Test execution info result.
@@ -436,6 +442,9 @@ fn test_declare_tx() {
         fee_transfer_call_info: expected_fee_transfer_call_info,
         actual_fee: expected_actual_fee,
         actual_resources: ResourcesMapping::default(),
+        n_storage_updates: 0,
+        n_modified_contracts: 0,
+        n_class_updates: 0,
     };
 
     // Test execution info result.
@@ -456,7 +465,7 @@ fn test_declare_tx() {
 
     // Verify class declaration.
     let contract_class_from_state = state.get_contract_class(&class_hash).unwrap();
-    assert_eq!(contract_class_from_state, contract_class);
+    assert_eq!(contract_class_from_state, Arc::from(contract_class.clone()));
 
     // Negative flow: check that the same class hash cannot be declared twice.
     let invalid_declare_tx = AccountTransaction::Declare(
@@ -542,6 +551,9 @@ fn test_deploy_account_tx() {
         fee_transfer_call_info: expected_fee_transfer_call_info,
         actual_fee: expected_actual_fee,
         actual_resources: ResourcesMapping::default(),
+        n_storage_updates: 0,
+        n_modified_contracts: 1,
+        n_class_updates: 1,
     };
 
     // Test execution info result.

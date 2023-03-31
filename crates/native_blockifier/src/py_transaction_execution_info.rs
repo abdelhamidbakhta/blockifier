@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use blockifier::execution::entry_point::{CallInfo, OrderedEvent, OrderedL2ToL1Message};
 use blockifier::transaction::objects::TransactionExecutionInfo;
+use cairo_vm::vm::runners::cairo_runner::ExecutionResources as VmExecutionResources;
 use pyo3::prelude::*;
 use starknet_api::hash::StarkFelt;
 
@@ -25,7 +26,6 @@ pub struct PyTransactionExecutionInfo {
     pub n_class_updates: usize,
     #[pyo3(get)]
     pub syscall_counter: HashMap<String, usize>,
-    // TODO: Create and add a PyExecutionResources field.
 }
 
 impl From<TransactionExecutionInfo> for PyTransactionExecutionInfo {
@@ -36,10 +36,10 @@ impl From<TransactionExecutionInfo> for PyTransactionExecutionInfo {
             execute_call_info: info.execute_call_info.map(PyCallInfo::from),
             fee_transfer_call_info: info.fee_transfer_call_info.map(PyCallInfo::from),
             actual_fee: info.actual_fee.0,
+            n_storage_updates: info.n_storage_updates,
+            n_modified_contracts: info.n_modified_contracts,
+            n_class_updates: info.n_class_updates,
             // TODO: Get actual values.
-            n_storage_updates: 0,
-            n_modified_contracts: 0,
-            n_class_updates: 0,
             syscall_counter: HashMap::default(),
         }
     }
@@ -61,6 +61,8 @@ pub struct PyCallInfo {
     pub entry_point_type: usize,
     #[pyo3(get)]
     pub calldata: Vec<PyFelt>,
+    #[pyo3(get)]
+    pub call_type: u8,
 
     // Call results.
     #[pyo3(get)]
@@ -88,8 +90,6 @@ pub struct PyCallInfo {
 
     // Deprecated fields; maintained for backward compatibility to Python.
     #[pyo3(get)]
-    pub call_type: usize,
-    #[pyo3(get)]
     pub code_address: Option<PyFelt>,
 }
 
@@ -108,8 +108,7 @@ impl From<CallInfo> for PyCallInfo {
             gas_consumed: PyFelt(StarkFelt::default()),
             failure_flag: PyFelt(StarkFelt::default()),
             retdata: to_py_vec(execution.retdata.0, PyFelt),
-            // TODO(Elin, 01/03/2023): Initialize correctly.
-            execution_resources: PyExecutionResources::default(),
+            execution_resources: PyExecutionResources::from(call_info.vm_resources),
             events: to_py_vec(execution.events, PyOrderedEvent::from),
             l2_to_l1_messages: to_py_vec(execution.l2_to_l1_messages, PyOrderedL2ToL1Message::from),
             internal_calls: to_py_vec(call_info.inner_calls, PyCallInfo::from),
@@ -119,7 +118,7 @@ impl From<CallInfo> for PyCallInfo {
                 .into_iter()
                 .map(|storage_key| PyFelt(*storage_key.0.key()))
                 .collect(),
-            call_type: 0, // CallType::CALL.
+            call_type: call.call_type as u8,
             code_address: None,
         }
     }
@@ -175,4 +174,14 @@ pub struct PyExecutionResources {
     pub builtin_instance_counter: HashMap<String, usize>,
     #[pyo3(get)]
     pub n_memory_holes: usize,
+}
+
+impl From<VmExecutionResources> for PyExecutionResources {
+    fn from(vm_resources: VmExecutionResources) -> Self {
+        Self {
+            n_steps: vm_resources.n_steps,
+            builtin_instance_counter: vm_resources.builtin_instance_counter,
+            n_memory_holes: vm_resources.n_memory_holes,
+        }
+    }
 }

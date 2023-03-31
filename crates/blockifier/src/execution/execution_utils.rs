@@ -21,7 +21,7 @@ use starknet_api::transaction::Calldata;
 
 use crate::block_context::BlockContext;
 use crate::execution::entry_point::{
-    execute_constructor_entry_point, CallEntryPoint, CallExecution, CallInfo,
+    execute_constructor_entry_point, CallEntryPoint, CallExecution, CallInfo, CallType,
     EntryPointExecutionResult, ExecutionContext, ExecutionResources, Retdata,
 };
 use crate::execution::errors::{
@@ -113,9 +113,7 @@ pub fn prepare_call_arguments(
     let mut implicit_args = vec![];
     implicit_args.push(MaybeRelocatable::from(initial_syscall_ptr));
     implicit_args.extend(
-        vm.get_builtin_runners()
-            .iter()
-            .flat_map(|(_name, builtin_runner)| builtin_runner.initial_stack()),
+        vm.get_builtin_runners().iter().flat_map(|builtin_runner| builtin_runner.initial_stack()),
     );
     args.push(CairoArg::from(implicit_args.clone()));
 
@@ -228,11 +226,10 @@ pub fn finalize_execution(
         .get_execution_resources(&vm)
         .map_err(VirtualMachineError::TracerError)?
         .filter_unused_builtins();
-    syscall_handler.execution_resources.vm_resources =
-        syscall_handler.execution_resources.vm_resources.clone() + vm_resources_without_inner_calls;
+    syscall_handler.execution_resources.vm_resources += &vm_resources_without_inner_calls;
 
     let full_call_vm_resources =
-        syscall_handler.execution_resources.vm_resources.clone() - previous_vm_resources;
+        &syscall_handler.execution_resources.vm_resources - &previous_vm_resources;
     Ok(CallInfo {
         call,
         execution: CallExecution {
@@ -301,7 +298,8 @@ fn read_execution_retdata(
     retdata_ptr: MaybeRelocatable,
 ) -> Result<Retdata, PostExecutionError> {
     let retdata_size = match retdata_size {
-        MaybeRelocatable::Int(retdata_size) => retdata_size.bits() as usize,
+        MaybeRelocatable::Int(retdata_size) => usize::try_from(retdata_size.to_bigint())
+            .map_err(PostExecutionError::RetdataSizeTooBig)?,
         relocatable => {
             return Err(VirtualMachineError::ExpectedIntAtRange(Some(relocatable)).into());
         }
@@ -471,6 +469,7 @@ pub fn execute_library_call(
         // The call context remains the same in a library call.
         storage_address: syscall_handler.storage_address,
         caller_address: syscall_handler.caller_address,
+        call_type: CallType::Delegate,
     };
 
     execute_inner_call(entry_point, vm, syscall_handler)

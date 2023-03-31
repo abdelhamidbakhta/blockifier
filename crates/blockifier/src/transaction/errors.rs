@@ -25,11 +25,33 @@ pub enum DeclareTransactionError {
 }
 
 #[derive(Debug, Error)]
+pub enum ContractConstructorExecutionError {
+    #[error("Contract constructor execution has failed.")]
+    ContractConstructorExecutionFailed(#[from] EntryPointExecutionError),
+}
+
+#[derive(Debug, Error)]
+pub enum ValidateTransactionError {
+    #[error("Transaction validation has failed.")]
+    ValidateExecutionFailed(#[from] EntryPointExecutionError),
+}
+
+#[derive(Debug, Error)]
+pub enum ExecuteTransactionError {
+    #[error("Transaction execution has failed.")]
+    ExecutionError(#[from] EntryPointExecutionError),
+}
+
+#[derive(Debug, Error)]
 pub enum TransactionExecutionError {
+    #[error(transparent)]
+    ContractConstructorExecutionFailed(#[from] ContractConstructorExecutionError),
     #[error(transparent)]
     DeclareTransactionError(#[from] DeclareTransactionError),
     #[error(transparent)]
     EntryPointExecutionError(#[from] EntryPointExecutionError),
+    #[error(transparent)]
+    ExecutionError(#[from] ExecuteTransactionError),
     #[error(transparent)]
     FeeTransferError(#[from] FeeTransferError),
     #[error("Invalid transaction nonce. Expected: {expected_nonce:?}; got: {actual_nonce:?}.")]
@@ -47,6 +69,10 @@ pub enum TransactionExecutionError {
     StateError(#[from] StateError),
     #[error("Calling other contracts during '{entry_point_kind}' execution is forbidden.")]
     UnauthorizedInnerCall { entry_point_kind: String },
+    #[error("Unexpected holes in the {object} order. Two objects with the same order: {order}.")]
+    UnexpectedHoles { object: String, order: usize },
     #[error("Unknown chain ID '{chain_id:?}'.")]
     UnknownChainId { chain_id: String },
+    #[error(transparent)]
+    ValidateTransactionError(#[from] ValidateTransactionError),
 }

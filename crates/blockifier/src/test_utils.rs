@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::iter::zip;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use once_cell::sync::Lazy;
 use starknet_api::block::{BlockNumber, BlockTimestamp};
@@ -20,10 +21,10 @@ use crate::abi::abi_utils::get_storage_var_address;
 use crate::block_context::BlockContext;
 use crate::execution::contract_class::ContractClass;
 use crate::execution::entry_point::{
-    CallEntryPoint, CallExecution, CallInfo, EntryPointExecutionResult, ExecutionContext,
+    CallEntryPoint, CallExecution, CallInfo, CallType, EntryPointExecutionResult, ExecutionContext,
     ExecutionResources, Retdata,
 };
-use crate::state::cached_state::{CachedState, ContractClassMapping, ContractStorageKey};
+use crate::state::cached_state::{CachedState, ContractStorageKey};
 use crate::state::errors::StateError;
 use crate::state::state_api::{State, StateReader, StateResult};
 use crate::transaction::objects::{AccountTransactionContext, TransactionExecutionInfo};
@@ -53,29 +54,6 @@ pub const TEST_EMPTY_CONTRACT_PATH: &str =
 pub const ERC20_CONTRACT_PATH: &str =
     "./ERC20_without_some_syscalls/ERC20/erc20_contract_without_some_syscalls_compiled.json";
 
-// Selectors.
-pub const WITHOUT_ARG_SELECTOR: &str =
-    "0x382a967a31be13f23e23a5345f7a89b0362cc157d6fbe7564e6396a83cf4b4f";
-pub const WITH_ARG_SELECTOR: &str =
-    "0xe7def693d16806ca2a2f398d8de5951344663ba77f340ed7a958da731872fc";
-pub const BITWISE_AND_SELECTOR: &str =
-    "0xad451bd0dba3d8d97104e1bfc474f88605ccc7acbe1c846839a120fdf30d95";
-pub const SQRT_SELECTOR: &str = "0x137a07fa9c479e27114b8ae1fbf252f2065cf91a0d8615272e060a7ccf37309";
-pub const RETURN_RESULT_SELECTOR: &str =
-    "0x39a1491f76903a16feed0a6433bec78de4c73194944e1118e226820ad479701";
-pub const TEST_STORAGE_READ_WRITE_SELECTOR: &str =
-    "0x3b097c62d3e4b85742aadd0dfb823f96134b886ec13bda57b68faf86f294d97";
-pub const TEST_LIBRARY_CALL_SELECTOR: &str =
-    "0x3604cea1cdb094a73a31144f14a3e5861613c008e1e879939ebc4827d10cd50";
-pub const TEST_NESTED_LIBRARY_CALL_SELECTOR: &str =
-    "0x3a6a8bae4c51d5959683ae246347ffdd96aa5b2bfa68cc8c3a6a7c2ed0be331";
-pub const TEST_CALL_CONTRACT_SELECTOR: &str =
-    "0x27c3334165536f239cfd400ed956eabff55fc60de4fb56728b6a4f6b87db01c";
-pub const TEST_DEPLOY_SELECTOR: &str =
-    "0x169f135eddda5ab51886052d777a57f2ea9c162d713691b5e04a6d4ed71d47f";
-pub const TEST_STORAGE_VAR_SELECTOR: &str =
-    "0x36fa6de2810d05c3e1a0ebe23f60b9c2f4629bbead09e5a9704e1c5632630d5";
-
 // Storage keys.
 pub static TEST_ERC20_SEQUENCER_BALANCE_KEY: Lazy<StorageKey> = Lazy::new(|| {
     get_storage_var_address("ERC20_balances", &[stark_felt!(TEST_SEQUENCER_ADDRESS)]).unwrap()
@@ -91,7 +69,7 @@ pub struct DictStateReader {
     pub storage_view: HashMap<ContractStorageKey, StarkFelt>,
     pub address_to_nonce: HashMap<ContractAddress, Nonce>,
     pub address_to_class_hash: HashMap<ContractAddress, ClassHash>,
-    pub class_hash_to_class: ContractClassMapping,
+    pub class_hash_to_class: HashMap<ClassHash, ContractClass>,
 }
 
 impl StateReader for DictStateReader {
@@ -110,10 +88,10 @@ impl StateReader for DictStateReader {
         Ok(nonce)
     }
 
-    fn get_contract_class(&mut self, class_hash: &ClassHash) -> StateResult<ContractClass> {
+    fn get_contract_class(&mut self, class_hash: &ClassHash) -> StateResult<Arc<ContractClass>> {
         let contract_class = self.class_hash_to_class.get(class_hash).cloned();
         match contract_class {
-            Some(contract_class) => Ok(contract_class),
+            Some(contract_class) => Ok(Arc::from(contract_class)),
             None => Err(StateError::UndeclaredClassHash(*class_hash)),
         }
     }
@@ -142,6 +120,7 @@ pub fn trivial_external_entry_point() -> CallEntryPoint {
         calldata: calldata![],
         storage_address: ContractAddress(patricia_key!(TEST_CONTRACT_ADDRESS)),
         caller_address: ContractAddress::default(),
+        call_type: CallType::Call,
     }
 }
 
@@ -156,6 +135,7 @@ pub fn create_test_state_util(
         ContractAddress(patricia_key!(contract_address)),
         ClassHash(stark_felt!(class_hash)),
     )]);
+
     CachedState::new(DictStateReader {
         class_hash_to_class,
         address_to_class_hash,
@@ -191,6 +171,7 @@ pub fn create_deploy_test_state() -> CachedState<DictStateReader> {
     ]);
     let address_to_class_hash =
         HashMap::from([(contract_address, class_hash), (another_contract_address, class_hash)]);
+
     CachedState::new(DictStateReader {
         class_hash_to_class,
         address_to_class_hash,
@@ -316,4 +297,7 @@ pub fn validate_tx_execution_info(
     compare_optional_call_infos(actual.fee_transfer_call_info, expected.fee_transfer_call_info);
     assert_eq!(actual.actual_fee, expected.actual_fee);
     assert_eq!(actual.actual_resources, expected.actual_resources);
+    assert_eq!(actual.n_storage_updates, expected.n_storage_updates);
+    assert_eq!(actual.n_modified_contracts, expected.n_modified_contracts);
+    assert_eq!(actual.n_class_updates, expected.n_class_updates);
 }

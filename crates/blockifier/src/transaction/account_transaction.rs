@@ -14,13 +14,13 @@ use crate::abi::abi_utils::selector_from_name;
 use crate::block_context::BlockContext;
 use crate::execution::contract_class::ContractClass;
 use crate::execution::entry_point::{
-    CallEntryPoint, CallInfo, ExecutionContext, ExecutionResources,
+    CallEntryPoint, CallInfo, CallType, ExecutionContext, ExecutionResources,
 };
 use crate::state::cached_state::TransactionalState;
 use crate::state::state_api::{State, StateReader};
 use crate::transaction::constants;
 use crate::transaction::errors::{
-    FeeTransferError, InvokeTransactionError, TransactionExecutionError,
+    FeeTransferError, InvokeTransactionError, TransactionExecutionError, ValidateTransactionError,
 };
 use crate::transaction::objects::{
     AccountTransactionContext, ResourcesMapping, TransactionExecutionInfo,
@@ -150,16 +150,19 @@ impl AccountTransaction {
             class_hash: None,
             storage_address: account_tx_context.sender_address,
             caller_address: ContractAddress::default(),
+            call_type: CallType::Call,
         };
         let mut execution_context = ExecutionContext::default();
 
-        let validate_call_info = validate_call.execute(
-            state,
-            execution_resources,
-            &mut execution_context,
-            block_context,
-            account_tx_context,
-        )?;
+        let validate_call_info = validate_call
+            .execute(
+                state,
+                execution_resources,
+                &mut execution_context,
+                block_context,
+                account_tx_context,
+            )
+            .map_err(ValidateTransactionError::ValidateExecutionFailed)?;
         verify_no_calls_to_other_contracts(
             &validate_call_info,
             String::from(constants::VALIDATE_ENTRY_POINT_NAME),
@@ -219,6 +222,7 @@ impl AccountTransaction {
             ],
             storage_address: block_context.fee_token_address,
             caller_address: account_tx_context.sender_address,
+            call_type: CallType::Call,
         };
         let mut execution_context = ExecutionContext::default();
 
@@ -313,6 +317,9 @@ impl<S: StateReader> ExecutableTransaction<S> for AccountTransaction {
 
         // Charge fee.
         let actual_resources = ResourcesMapping::default();
+        let (n_storage_updates, n_modified_contracts, n_class_updates) =
+            state.count_actual_state_changes();
+
         let (actual_fee, fee_transfer_call_info) =
             Self::charge_fee(state, block_context, &account_tx_context)?;
 
@@ -322,6 +329,9 @@ impl<S: StateReader> ExecutableTransaction<S> for AccountTransaction {
             fee_transfer_call_info,
             actual_fee,
             actual_resources,
+            n_storage_updates,
+            n_modified_contracts,
+            n_class_updates,
         };
         Ok(tx_execution_info)
     }
